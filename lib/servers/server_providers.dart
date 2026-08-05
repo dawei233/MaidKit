@@ -25,9 +25,9 @@ import 'package:maid_kit/shared/presentation/app_scaffold.dart';
 import 'app_theme_preferences.dart';
 import 'ghostty_terminal_session_adapter.dart';
 import 'cloud_sync_service.dart';
+import 'webdav_sync_service.dart';
 import 'metrics_refresh_preferences.dart';
 import 'port_forwarding_models.dart';
-import 'privacy_preferences.dart';
 import 'server_repository.dart';
 import 'server_metrics_refresh_scheduler.dart';
 import 'ssh_connection_manager.dart';
@@ -66,6 +66,31 @@ final cloudSyncConfigurationForVaultProvider =
     FutureProvider.family<CloudSyncConfiguration?, String>((ref, vaultId) {
       return ref
           .watch(cloudSyncServiceForVaultProvider(vaultId))
+          .configuration();
+    });
+
+final webDavSyncServiceForVaultProvider =
+    Provider.family<WebDavSyncService, String>((ref, vaultId) {
+      return WebDavSyncService(vaultId: vaultId);
+    });
+
+final webDavSyncServiceProvider = Provider<WebDavSyncService>((ref) {
+  return ref.watch(
+    webDavSyncServiceForVaultProvider(
+      ref.watch(activeVaultFileProvider) ?? 'maid_kit',
+    ),
+  );
+});
+
+final webDavSyncConfigurationProvider =
+    FutureProvider<WebDavSyncConfiguration?>((ref) {
+      return ref.watch(webDavSyncServiceProvider).configuration();
+    });
+
+final webDavSyncConfigurationForVaultProvider =
+    FutureProvider.family<WebDavSyncConfiguration?, String>((ref, vaultId) {
+      return ref
+          .watch(webDavSyncServiceForVaultProvider(vaultId))
           .configuration();
     });
 
@@ -560,25 +585,6 @@ final metricsRefreshSettingsProvider = Provider<MetricsRefreshSettings>(
   (ref) => InMemoryMetricsRefreshSettings(),
 );
 
-final privacySettingsProvider = Provider<PrivacySettings>(
-  (ref) => InMemoryPrivacySettings(),
-);
-
-final hideServerAddressesProvider =
-    NotifierProvider<HideServerAddressesNotifier, bool>(
-      HideServerAddressesNotifier.new,
-    );
-
-class HideServerAddressesNotifier extends Notifier<bool> {
-  @override
-  bool build() => ref.read(privacySettingsProvider).hideServerAddresses;
-
-  Future<void> setEnabled(bool value) async {
-    await ref.read(privacySettingsProvider).saveHideServerAddresses(value);
-    state = value;
-  }
-}
-
 final serverMetricsRefreshIntervalProvider =
     NotifierProvider<ServerMetricsRefreshIntervalNotifier, Duration>(
       ServerMetricsRefreshIntervalNotifier.new,
@@ -848,6 +854,14 @@ final connectionManagerProvider = Provider<SshConnectionManager>((ref) {
     () => ref.read(terminalSessionAdapterFactoryProvider),
     brandingEnvironmentEnabled: () =>
         ref.read(terminalBrandingEnvironmentEnabledProvider),
+    onCommandRecorded: (serverId, command) {
+      // Persist terminal command history so it syncs across devices with the
+      // rest of the vault. Best-effort: failures must never break the shell.
+      final database = ref.read(databaseProvider);
+      unawaited(
+        database.recordTerminalCommand(serverId: serverId, command: command),
+      );
+    },
   );
   ref.onDispose(manager.dispose);
   return manager;

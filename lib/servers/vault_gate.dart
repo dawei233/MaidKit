@@ -10,7 +10,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:maid_kit/shared/services/package_info_provider.dart';
 
 import 'server_providers.dart';
-import 'cloud_sync_service.dart';
+import 'webdav_sync_service.dart';
 import 'database_backup_service.dart';
 import 'vault_create_page.dart';
 
@@ -61,7 +61,7 @@ class _VaultGateState extends ConsumerState<VaultGate>
       final vault = ref.read(vaultServiceProvider);
       final password = await vault.syncPassphrase();
       if (password == null || !mounted) return;
-      final sync = ref.read(cloudSyncServiceProvider);
+      final sync = ref.read(webDavSyncServiceProvider);
       if (await sync.configuration() == null || !mounted) return;
       final backup = DatabaseBackupService(ref.read(databaseProvider), vault);
       await sync.sync(
@@ -69,7 +69,7 @@ class _VaultGateState extends ConsumerState<VaultGate>
         applyArchive: (archive) => backup.importArchive(archive, password),
         contentFingerprint: backup.contentFingerprint,
       );
-      if (mounted) ref.invalidate(cloudSyncConfigurationProvider);
+      if (mounted) ref.invalidate(webDavSyncConfigurationProvider);
     } catch (_) {
       // Auto-sync is best effort. Manual sync remains available for errors.
     } finally {
@@ -97,7 +97,7 @@ class _VaultGateState extends ConsumerState<VaultGate>
           throw StateError('vaultInvalidPassword'.tr());
         }
       } else {
-        final sync = ref.read(cloudSyncServiceProvider);
+        final sync = ref.read(webDavSyncServiceProvider);
         final configuration = await sync.configuration();
         final isCloudDownload = configuration?.pendingDownload == true;
         await vault.create(_password.text);
@@ -111,13 +111,13 @@ class _VaultGateState extends ConsumerState<VaultGate>
               archive: await backup.exportArchive(_password.text),
               applyArchive: (archive) =>
                   backup.importArchive(archive, _password.text),
-              conflictResolution: CloudSyncConflictResolution.downloadRemote,
+              conflictResolution: WebDavSyncConflictResolution.downloadRemote,
               contentFingerprint: backup.contentFingerprint,
             );
             await sync.completePendingDownload();
-            ref.invalidate(cloudSyncConfigurationProvider);
+            ref.invalidate(webDavSyncConfigurationProvider);
             downloadedCloudVault = true;
-          } on CloudSyncException {
+          } on WebDavSyncException {
             await vault.discardNewVault();
             rethrow;
           } catch (_) {
@@ -218,7 +218,7 @@ class _VaultGateState extends ConsumerState<VaultGate>
     });
     final exists = ref.watch(vaultExistsProvider);
     final biometricEnabled = ref.watch(biometricUnlockEnabledProvider);
-    final cloudConfiguration = ref.watch(cloudSyncConfigurationProvider);
+    final cloudConfiguration = ref.watch(webDavSyncConfigurationProvider);
     final activeFile = ref.watch(activeVaultFileProvider);
     final vaultFiles = ref.watch(vaultFilesProvider);
     final vaultLabels = ref.watch(vaultLabelsProvider);

@@ -22,9 +22,11 @@ import 'package:maid_kit/agent/billing_service.dart';
 import 'package:maid_kit/agent/personality_service.dart';
 import 'package:maid_kit/routing/app_router.gr.dart';
 import 'package:maid_kit/shared/presentation/app_scaffold.dart';
+import 'package:maid_kit/shared/presentation/webdav_configuration_sheet.dart';
 
 import 'database_backup_service.dart';
 import 'cloud_sync_service.dart';
+import 'webdav_sync_service.dart';
 import 'server_providers.dart';
 import 'tailscale_settings_section.dart';
 import 'terminal_adapter_preferences.dart';
@@ -49,7 +51,6 @@ class SettingsPage extends ConsumerWidget {
     final terminalLightTheme = ref.watch(terminalLightThemeProvider);
     final terminalDarkTheme = ref.watch(terminalDarkThemeProvider);
     final connectOnStartup = ref.watch(connectOnStartupProvider);
-    final hideServerAddresses = ref.watch(hideServerAddressesProvider);
     final refreshInterval = ref.watch(serverMetricsRefreshIntervalProvider);
     final focusedRefreshInterval = ref.watch(
       focusedServerRefreshIntervalProvider,
@@ -373,17 +374,6 @@ class SettingsPage extends ConsumerWidget {
                       value: connectOnStartup,
                       onChanged: (value) => ref
                           .read(connectOnStartupProvider.notifier)
-                          .setEnabled(value),
-                    ),
-                    SwitchListTile(
-                      contentPadding: _sectionTilePadding,
-                      title: const Text('settingsHideServerAddresses').tr(),
-                      subtitle: const Text(
-                        'settingsHideServerAddressesHint',
-                      ).tr(),
-                      value: hideServerAddresses,
-                      onChanged: (value) => ref
-                          .read(hideServerAddressesProvider.notifier)
                           .setEnabled(value),
                     ),
                     Padding(
@@ -1075,7 +1065,7 @@ class SettingsPage extends ConsumerWidget {
       ref.invalidate(cloudUserProvider);
       ref.invalidate(cloudWorkspacesProvider);
       for (final vaultId in ref.read(vaultFilesProvider)) {
-        ref.invalidate(cloudSyncConfigurationForVaultProvider(vaultId));
+        ref.invalidate(webDavSyncConfigurationForVaultProvider(vaultId));
       }
       if (context.mounted) _showMessage('settingsCloudSignOutSuccess'.tr());
     } on CloudSyncException catch (error) {
@@ -1446,29 +1436,50 @@ class SettingsPage extends ConsumerWidget {
 
   Future<void> _downloadCloudVault(BuildContext context, WidgetRef ref) async {
     try {
-      final accountService = ref.read(cloudSyncServiceProvider);
-      final workspaces = await accountService.signInAndListWorkspaces();
+      // 1. Gather WebDAV credentials (reuse the same configuration sheet).
+      final credentials = await showWebDavConfigurationSheet(
+        context,
+        vaultLabel: 'settingsVaultDownloadCloud'.tr(),
+      );
+      if (credentials == null || !context.mounted) return;
+
+      // 2. Probe the server and list remote vaults.
+      final probe = WebDavSyncService(vaultId: 'probe');
+      final vaults = await probe.listRemoteVaults(
+        baseUrl: credentials.baseUrl,
+        username: credentials.username,
+        password: credentials.password,
+        remotePath: credentials.remotePath,
+      );
       if (!context.mounted) return;
-      final workspace = await _chooseCloudWorkspace(context, workspaces);
-      if (workspace == null || !context.mounted) return;
-      final blobs = await accountService.listVaultBlobs(workspace);
-      if (!context.mounted) return;
-      final blob = await _chooseCloudVault(context, blobs);
-      if (blob == null || !context.mounted) return;
+      if (vaults.isEmpty) {
+        _showMessage('settingsVaultNoCloudVaults'.tr());
+        return;
+      }
+      final vault = await _chooseWebDavVault(context, vaults);
+      if (vault == null || !context.mounted) return;
       final name = await _chooseVaultNameSheet(
         context,
-        initialValue: workspace.name,
+        initialValue: vault.name,
       );
       if (name == null || !context.mounted) return;
 
+      // 3. Create the local vault and bind it to the remote blob. The vault
+      // gate adopts the pending download on the next unlock.
       final path = await ref
           .read(vaultFileStorageProvider)
           .createVaultPath(name: name);
-      final sync = ref.read(cloudSyncServiceForVaultProvider(path));
-      await sync.enable(workspace, existingBlob: blob);
-      ref.invalidate(cloudSyncConfigurationForVaultProvider(path));
+      final service = ref.read(webDavSyncServiceForVaultProvider(path));
+      await service.enableDownload(
+        baseUrl: credentials.baseUrl,
+        username: credentials.username,
+        password: credentials.password,
+        remotePath: credentials.remotePath,
+        vault: vault,
+      );
+      ref.invalidate(webDavSyncConfigurationForVaultProvider(path));
       await ref.read(activeVaultFileProvider.notifier).select(path);
-    } on CloudSyncException catch (error) {
+    } on WebDavSyncException catch (error) {
       if (context.mounted) _showMessage(error.message);
     } catch (error) {
       if (context.mounted) {
@@ -1477,39 +1488,10 @@ class SettingsPage extends ConsumerWidget {
     }
   }
 
-  Future<CloudWorkspace?> _chooseCloudWorkspace(
+  Future<RemoteVaultInfo?> _chooseWebDavVault(
     BuildContext context,
-    List<CloudWorkspace> workspaces,
-  ) => showModalBottomSheet<CloudWorkspace>(
-    context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    useRootNavigator: true,
-    builder: (sheetContext) => SheetScaffold(
-      titleText: 'vaultCloudWorkspaceTitle'.tr(),
-      heightFactor: 0.6,
-      child: workspaces.isEmpty
-          ? ListView(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-              children: [const Text('settingsCloudSyncNoWorkspaces').tr()],
-            )
-          : ListView(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-              children: [
-                for (final workspace in workspaces)
-                  ListTile(
-                    title: Text(workspace.name),
-                    onTap: () => Navigator.of(sheetContext).pop(workspace),
-                  ),
-              ],
-            ),
-    ),
-  );
-
-  Future<CloudVaultBlob?> _chooseCloudVault(
-    BuildContext context,
-    List<CloudVaultBlob> blobs,
-  ) => showModalBottomSheet<CloudVaultBlob>(
+    List<RemoteVaultInfo> vaults,
+  ) => showModalBottomSheet<RemoteVaultInfo>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
@@ -1517,27 +1499,22 @@ class SettingsPage extends ConsumerWidget {
     builder: (sheetContext) => SheetScaffold(
       titleText: 'settingsVaultDownloadCloud'.tr(),
       heightFactor: 0.6,
-      child: blobs.isEmpty
-          ? ListView(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-              children: [const Text('settingsVaultNoCloudVaults').tr()],
-            )
-          : ListView(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-              children: [
-                for (final blob in blobs)
-                  ListTile(
-                    leading: const Icon(Symbols.lock),
-                    title: Text(
-                      'settingsVaultCloudVault'.tr(
-                        args: [blob.revision.toString()],
-                      ),
-                    ),
-                    subtitle: Text(blob.id),
-                    onTap: () => Navigator.of(sheetContext).pop(blob),
-                  ),
-              ],
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+        children: [
+          for (final vault in vaults)
+            ListTile(
+              leading: const Icon(Symbols.lock),
+              title: Text(vault.name),
+              subtitle: Text(
+                'settingsVaultCloudVault'.tr(
+                  args: [vault.revision.toString()],
+                ),
+              ),
+              onTap: () => Navigator.of(sheetContext).pop(vault),
             ),
+        ],
+      ),
     ),
   );
 
@@ -1566,18 +1543,18 @@ class SettingsPage extends ConsumerWidget {
         showSnackBar('settingsVaultSyncStarted'.tr());
       }
       final backup = DatabaseBackupService(ref.read(databaseProvider), vault);
-      final service = ref.read(cloudSyncServiceForVaultProvider(vaultId));
+      final service = ref.read(webDavSyncServiceForVaultProvider(vaultId));
       final archive = await backup.exportArchive(syncPassword);
       await service.sync(
         archive: archive,
         applyArchive: (archive) => backup.importArchive(archive, syncPassword),
         contentFingerprint: backup.contentFingerprint,
       );
-      ref.invalidate(cloudSyncConfigurationForVaultProvider(vaultId));
+      ref.invalidate(webDavSyncConfigurationForVaultProvider(vaultId));
       if (context.mounted) {
         showSnackBar('settingsVaultSyncComplete'.tr());
       }
-    } on CloudSyncException catch (error) {
+    } on WebDavSyncException catch (error) {
       if (context.mounted) showSnackBar(error.message);
     } catch (error) {
       if (context.mounted) {
@@ -1596,6 +1573,14 @@ enum _VaultTileAction { changeCloudBinding, rename, delete }
 enum _SettingsTilePosition { only, first, middle, last }
 
 const _sectionTilePadding = EdgeInsets.symmetric(horizontal: 16);
+
+String _webDavEndpointLabel(WebDavSyncConfiguration configuration) {
+  final uri = Uri.tryParse(configuration.baseUrl);
+  final host = uri?.host ?? configuration.baseUrl;
+  final path = configuration.remotePath.trim();
+  if (path.isEmpty || path == '/') return host;
+  return '$host$path';
+}
 
 String _usageLabel(BillingUsage? usage) {
   if (usage == null) return '—';
@@ -1957,11 +1942,13 @@ class _VaultCloudBindingTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final binding = ref.watch(cloudSyncConfigurationForVaultProvider(vaultId));
+    final binding = ref.watch(webDavSyncConfigurationForVaultProvider(vaultId));
     final configuration = binding.asData?.value;
     final workspace = configuration == null
         ? 'settingsVaultWorkspaceUnbound'.tr()
-        : 'settingsVaultWorkspaceBound'.tr(args: [configuration.workspaceName]);
+        : 'settingsVaultWorkspaceBound'.tr(
+            args: [_webDavEndpointLabel(configuration)],
+          );
     final syncStatus = configuration == null
         ? 'settingsVaultSyncDisabled'.tr()
         : 'settingsVaultLastSync'.tr(
@@ -1993,7 +1980,7 @@ class _VaultCloudBindingTile extends ConsumerWidget {
                 PopupMenuButton<_VaultTileAction>(
                   onSelected: (action) {
                     if (action == _VaultTileAction.changeCloudBinding) {
-                      _bindWorkspace(context, ref);
+                      _configureWebDav(context, ref);
                     }
                     if (action == _VaultTileAction.rename) onRename?.call();
                     if (action == _VaultTileAction.delete) onDelete?.call();
@@ -2054,48 +2041,30 @@ class _VaultCloudBindingTile extends ConsumerWidget {
     );
   }
 
-  Future<void> _bindWorkspace(BuildContext context, WidgetRef ref) async {
+  Future<void> _configureWebDav(BuildContext context, WidgetRef ref) async {
+    final existing = ref
+        .read(webDavSyncConfigurationForVaultProvider(vaultId))
+        .asData
+        ?.value;
+    final result = await showWebDavConfigurationSheet(
+      context,
+      initial: existing,
+      vaultLabel: title,
+    );
+    if (result == null || !context.mounted) return;
     try {
-      final service = ref.read(cloudSyncServiceForVaultProvider(vaultId));
-      final workspaces = await service.signInAndListWorkspaces();
-      if (!context.mounted) return;
-      final selected = ref
-          .read(cloudSyncConfigurationForVaultProvider(vaultId))
-          .asData
-          ?.value;
-      final workspace = await showModalBottomSheet<CloudWorkspace>(
-        context: context,
-        isScrollControlled: true,
-        useSafeArea: true,
-        useRootNavigator: true,
-        builder: (sheetContext) => SheetScaffold(
-          title: Text(title),
-          heightFactor: 0.6,
-          child: workspaces.isEmpty
-              ? ListView(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-                  children: [const Text('settingsCloudSyncNoWorkspaces').tr()],
-                )
-              : ListView(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-                  children: [
-                    for (final workspace in workspaces)
-                      ListTile(
-                        title: Text(workspace.name),
-                        trailing: selected?.workspaceId == workspace.id
-                            ? const Icon(Symbols.check)
-                            : null,
-                        onTap: () => Navigator.of(sheetContext).pop(workspace),
-                      ),
-                  ],
-                ),
-        ),
+      final service = ref.read(webDavSyncServiceForVaultProvider(vaultId));
+      await service.enable(
+        baseUrl: result.baseUrl,
+        username: result.username,
+        password: result.password,
+        remotePath: result.remotePath,
       );
-      if (workspace == null) return;
-      await service.enable(workspace);
-      ref.invalidate(cloudSyncConfigurationForVaultProvider(vaultId));
-      ref.invalidate(cloudUserProvider);
-    } on CloudSyncException catch (error) {
+      ref.invalidate(webDavSyncConfigurationForVaultProvider(vaultId));
+      if (context.mounted) {
+        showSnackBar('settingsVaultSyncConfigured'.tr());
+      }
+    } on WebDavSyncException catch (error) {
       if (context.mounted) showSnackBar(error.message);
     } catch (_) {
       if (context.mounted) showSnackBar('commonSomethingWentWrong'.tr());

@@ -4,7 +4,9 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:island_ui_foundation/island_ui_foundation.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
-import 'cloud_sync_service.dart';
+import 'package:maid_kit/shared/presentation/webdav_configuration_sheet.dart';
+
+import 'webdav_sync_service.dart';
 import 'server_providers.dart';
 
 /// Full-screen vault onboarding reached from the locked vault gate.
@@ -237,27 +239,46 @@ class _VaultCreatePageState extends ConsumerState<VaultCreatePage> {
       _busy = true;
     });
     try {
-      final accountService = ref.read(cloudSyncServiceProvider);
-      final workspaces = await accountService.signInAndListWorkspaces();
+      final credentials = await showWebDavConfigurationSheet(
+        context,
+        vaultLabel: 'settingsVaultDownloadCloud'.tr(),
+      );
+      if (credentials == null || !mounted) return;
+
+      final probe = WebDavSyncService(vaultId: 'probe');
+      final vaults = await probe.listRemoteVaults(
+        baseUrl: credentials.baseUrl,
+        username: credentials.username,
+        password: credentials.password,
+        remotePath: credentials.remotePath,
+      );
       if (!mounted) return;
-      final workspace = await _chooseCloudWorkspace(workspaces);
-      if (workspace == null || !mounted) return;
-      final blobs = await accountService.listVaultBlobs(workspace);
-      if (!mounted) return;
-      final blob = await _chooseCloudVault(blobs);
-      if (blob == null || !mounted) return;
-      final name = await _chooseVaultName(initialValue: workspace.name);
+      if (vaults.isEmpty) {
+        setState(() => _error = 'settingsVaultNoCloudVaults'.tr());
+        return;
+      }
+      final vault = await _chooseRemoteVault(vaults);
+      if (vault == null || !mounted) return;
+      final name = await _chooseVaultName(initialValue: vault.name);
       if (name == null || !mounted) return;
 
       final path = await ref
           .read(vaultFileStorageProvider)
           .createVaultPath(name: name);
       await ref.read(vaultLabelsProvider.notifier).rename(path, name);
-      final sync = ref.read(cloudSyncServiceForVaultProvider(path));
-      await sync.enable(workspace, existingBlob: blob);
-      ref.invalidate(cloudSyncConfigurationForVaultProvider(path));
+      final sync = ref.read(webDavSyncServiceForVaultProvider(path));
+      await sync.enableDownload(
+        baseUrl: credentials.baseUrl,
+        username: credentials.username,
+        password: credentials.password,
+        remotePath: credentials.remotePath,
+        vault: vault,
+      );
+      ref.invalidate(webDavSyncConfigurationForVaultProvider(path));
       await ref.read(activeVaultFileProvider.notifier).select(path);
       if (mounted) Navigator.of(context).pop(false);
+    } on WebDavSyncException catch (error) {
+      if (mounted) setState(() => _error = error.message);
     } catch (error) {
       if (mounted) setState(() => _error = _friendlyError(error));
     } finally {
@@ -265,36 +286,8 @@ class _VaultCreatePageState extends ConsumerState<VaultCreatePage> {
     }
   }
 
-  Future<CloudWorkspace?> _chooseCloudWorkspace(
-    List<CloudWorkspace> workspaces,
-  ) => showModalBottomSheet<CloudWorkspace>(
-    context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    useRootNavigator: true,
-    builder: (sheetContext) => SheetScaffold(
-      titleText: 'vaultCloudWorkspaceTitle'.tr(),
-      heightFactor: 0.6,
-      child: workspaces.isEmpty
-          ? ListView(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-              children: [const Text('settingsCloudSyncNoWorkspaces').tr()],
-            )
-          : ListView(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-              children: [
-                for (final workspace in workspaces)
-                  ListTile(
-                    title: Text(workspace.name),
-                    onTap: () => Navigator.of(sheetContext).pop(workspace),
-                  ),
-              ],
-            ),
-    ),
-  );
-
-  Future<CloudVaultBlob?> _chooseCloudVault(List<CloudVaultBlob> blobs) =>
-      showModalBottomSheet<CloudVaultBlob>(
+  Future<RemoteVaultInfo?> _chooseRemoteVault(List<RemoteVaultInfo> vaults) =>
+      showModalBottomSheet<RemoteVaultInfo>(
         context: context,
         isScrollControlled: true,
         useSafeArea: true,
@@ -302,7 +295,7 @@ class _VaultCreatePageState extends ConsumerState<VaultCreatePage> {
         builder: (sheetContext) => SheetScaffold(
           titleText: 'settingsVaultDownloadCloud'.tr(),
           heightFactor: 0.6,
-          child: blobs.isEmpty
+          child: vaults.isEmpty
               ? ListView(
                   padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
                   children: [const Text('settingsVaultNoCloudVaults').tr()],
@@ -310,16 +303,16 @@ class _VaultCreatePageState extends ConsumerState<VaultCreatePage> {
               : ListView(
                   padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
                   children: [
-                    for (final blob in blobs)
+                    for (final vault in vaults)
                       ListTile(
                         leading: const Icon(Symbols.lock),
-                        title: Text(
+                        title: Text(vault.name),
+                        subtitle: Text(
                           'settingsVaultCloudVault'.tr(
-                            args: [blob.revision.toString()],
+                            args: [vault.revision.toString()],
                           ),
                         ),
-                        subtitle: Text(blob.id),
-                        onTap: () => Navigator.of(sheetContext).pop(blob),
+                        onTap: () => Navigator.of(sheetContext).pop(vault),
                       ),
                   ],
                 ),

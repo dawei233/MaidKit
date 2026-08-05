@@ -29,12 +29,17 @@ class SshConnectionManager {
     this._terminalAdapterFactory, {
     bool Function()? brandingEnvironmentEnabled,
     ServerMetricsCollector? metricsCollector,
+    this.onCommandRecorded,
   }) : _brandingEnvironmentEnabled = brandingEnvironmentEnabled ?? (() => true),
        _metricsCollector = metricsCollector ?? AutoServerMetricsCollector();
 
   final TerminalSessionAdapterFactory Function() _terminalAdapterFactory;
   final bool Function() _brandingEnvironmentEnabled;
   final ServerMetricsCollector _metricsCollector;
+
+  /// Invoked with every submitted terminal command so the app can persist
+  /// command history. Fire-and-forget: recording failures are swallowed.
+  final void Function(int serverId, String command)? onCommandRecorded;
 
   /// These clients are used exclusively for collecting server information.
   /// Terminal shells keep their own clients so reconnecting statistics never
@@ -203,6 +208,9 @@ class SshConnectionManager {
         event.pixelWidth,
         event.pixelHeight,
       ),
+      onCommand: onCommandRecorded == null
+          ? null
+          : (command) => onCommandRecorded!(server.id, command),
     );
     _terminals[terminalId] = _TerminalConnection(
       serverId: server.id,

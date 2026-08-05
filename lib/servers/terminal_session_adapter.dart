@@ -10,6 +10,7 @@ import 'package:xterm/xterm.dart';
 import 'package:maid_kit/theme.dart';
 
 import 'terminal_color_scheme.dart';
+import 'terminal_command_recorder.dart';
 
 /// A terminal emulator instance attached to one remote shell.
 ///
@@ -540,12 +541,16 @@ class TerminalSessionBinding {
     required void Function(Uint8List bytes) send,
     required void Function(TerminalResize resize) resize,
     this.outputFlushDelay = const Duration(milliseconds: 8),
+    this.onCommand,
   }) : // Public parameter names preserve the adapter binding API.
        // ignore: prefer_initializing_formals
        _send = send,
        // ignore: prefer_initializing_formals
        _resize = resize,
-       _subscriptions = [] {
+       _subscriptions = [],
+       _recorder = onCommand == null
+           ? null
+           : TerminalCommandRecorder(onCommand: onCommand) {
     _subscriptions.addAll([
       stdout.listen(_queueTerminalOutput, onError: _ignoreTransportError),
       stderr.listen(_queueTerminalOutput, onError: _ignoreTransportError),
@@ -559,9 +564,14 @@ class TerminalSessionBinding {
   final void Function(TerminalResize resize) _resize;
   final List<StreamSubscription<Object?>> _subscriptions;
   final Duration outputFlushDelay;
+  final TerminalCommandRecorder? _recorder;
   final _outputBuffer = BytesBuilder(copy: false);
   Timer? _outputFlushTimer;
   var _closed = false;
+
+  /// Called with the complete command text every time the user submits a
+  /// command in the terminal (Enter). Used to persist command history.
+  final void Function(String command)? onCommand;
 
   // SSH channel streams can report an error while their terminal is being
   // closed. The owner observes shell completion and tears this binding down,
@@ -572,6 +582,7 @@ class TerminalSessionBinding {
   void _sendTerminalInput(Uint8List bytes) {
     if (_closed) return;
     try {
+      _recorder?.add(bytes);
       _send(bytes);
     } catch (_) {
       // The SSH channel can close between delivering input and teardown.

@@ -188,6 +188,17 @@ class AgentSkills extends Table {
   DateTimeColumn get updatedAt => dateTime()();
 }
 
+/// Commands the user ran inside a terminal, keyed by the server they ran on.
+/// Portable across devices through the encrypted vault archive, so command
+/// history follows the user when a vault is synced via WebDAV.
+class TerminalHistory extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  IntColumn get serverId => integer()();
+  TextColumn get command => text()();
+  IntColumn get exitCode => integer().nullable()();
+  DateTimeColumn get executedAt => dateTime()();
+}
+
 /// A GitHub account the user signed in with. Only non-secret identity is kept
 /// here; the access token lives in the OS keychain under a key derived from
 /// [accountLogin] and never enters the vault database or cloud sync.
@@ -243,6 +254,7 @@ class GitHubProjectWorkflowLinks extends Table {
     AgentProviderModels,
     McpServers,
     AgentSkills,
+    TerminalHistory,
     GitHubConnections,
     GitHubRepoPins,
     GitHubProjectWorkflowLinks,
@@ -262,7 +274,7 @@ class AppDatabase extends _$AppDatabase {
       );
 
   @override
-  int get schemaVersion => 20;
+  int get schemaVersion => 21;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -460,6 +472,9 @@ class AppDatabase extends _$AppDatabase {
         await m.addColumn(servers, servers.initialSnippets);
         await m.addColumn(servers, servers.tags);
       }
+      if (from < 21) {
+        await m.createTable(terminalHistory);
+      }
     },
   );
 
@@ -512,4 +527,42 @@ class AppDatabase extends _$AppDatabase {
 
   Stream<List<GitHubProjectWorkflowLink>> watchGitHubProjectWorkflowLinks() =>
       select(gitHubProjectWorkflowLinks).watch();
+
+  /// Most recently executed terminal commands, newest first.
+  Stream<List<TerminalHistoryData>> watchTerminalHistory({
+    int? serverId,
+    int limit = 200,
+  }) {
+    final query = select(terminalHistory)
+      ..orderBy([(table) => OrderingTerm.desc(table.executedAt)])
+      ..limit(limit);
+    if (serverId != null) {
+      query.where((table) => table.serverId.equals(serverId));
+    }
+    return query.watch();
+  }
+
+  Future<void> recordTerminalCommand({
+    required int serverId,
+    required String command,
+    int? exitCode,
+  }) async {
+    await into(terminalHistory).insert(
+      TerminalHistoryCompanion.insert(
+        serverId: serverId,
+        command: command,
+        exitCode: Value(exitCode),
+        executedAt: DateTime.now().toUtc(),
+      ),
+    );
+    // Keep history bounded: anything beyond the most recent 1000 rows is
+    // pruned on each write so syncing stays cheap.
+    await customStatement('''
+      DELETE FROM terminal_history WHERE id IN (
+        SELECT id FROM terminal_history
+        ORDER BY executed_at DESC
+        LIMIT -1 OFFSET 1000
+      )
+    ''');
+  }
 }
