@@ -37,16 +37,17 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       # cargokit's resolve_symlinks.ps1 resolves the .plugin_symlinks link
       # target segment by segment using Get-Item. The link target points into
-      # %USERPROFILE%\AppData\Local\Pub\Cache, but on GitHub Actions runners
-      # that AppData tree may not exist, making Get-Item throw. Pre-create the
-      # directory chain so the script can walk it.
+      # C:\Users\runneradmin\AppData\Local\Pub\Cache, but on GitHub Actions
+      # runners that AppData tree may not exist, making Get-Item throw.
+      # Pre-create the directory chain (hardcoded path) so the script can
+      # walk it. Diagnostics included so the workflow log shows what exists.
       - name: Ensure AppData tree for cargokit
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\AppData" | Out-Null
-          New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\AppData\Local" | Out-Null
-          New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\AppData\Local\Pub" | Out-Null
-          New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\AppData\Local\Pub\Cache" | Out-Null
+          Write-Host "USERPROFILE=$env:USERPROFILE"
+          New-Item -ItemType Directory -Force -Path "C:\Users\runneradmin\AppData\Local\Pub\Cache" | Out-Null
+          Get-Item "C:\Users\runneradmin\AppData" | Select-Object FullName
+          Get-Item "C:\Users\runneradmin\AppData\Local\Pub\Cache" | Select-Object FullName
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
       - run: flutter build windows --release
