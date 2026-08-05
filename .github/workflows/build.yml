@@ -37,11 +37,21 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       # libghostty (the vendored Ghostty terminal) compiles its native library
       # from source with Zig via a native-assets hook. GitHub Actions runners
-      # do not ship Zig, so install it explicitly before building.
+      # do not ship Zig, so install it explicitly before building. Download is
+      # done manually because Zig 0.15.x renamed its Windows tarball to
+      # zig-x86_64-windows-<ver>.zip, which setup-zig actions do not know.
       - name: Set up Zig
-        uses: mlugg/setup-zig@v1
-        with:
-          version: 0.15.2
+        shell: pwsh
+        run: |
+          $url = "https://ziglang.org/download/0.15.2/zig-x86_64-windows-0.15.2.zip"
+          $zip = Join-Path $env:RUNNER_TEMP "zig.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath "D:\zig" -Force
+          $zigExe = Get-ChildItem "D:\zig" -Recurse -Filter "zig.exe" | Select-Object -First 1
+          if (-not $zigExe) { throw "zig.exe not found after extraction" }
+          $binDir = Split-Path $zigExe.FullName
+          Write-Host "zig at $binDir"
+          "PATH=$env:PATH;$binDir" | Out-File -Append -FilePath $env:GITHUB_ENV
       # cargokit's resolve_symlinks.ps1 (used by super_native_extensions)
       # resolves .plugin_symlinks targets segment by segment with Get-Item.
       # On GitHub Actions the default pub cache lives under
