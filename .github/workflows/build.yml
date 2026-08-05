@@ -35,19 +35,18 @@ jobs:
       # so install rustup explicitly before building.
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
-      # cargokit's resolve_symlinks.ps1 resolves the .plugin_symlinks link
-      # target segment by segment using Get-Item. The link target points into
-      # C:\Users\runneradmin\AppData\Local\Pub\Cache, but on GitHub Actions
-      # runners that AppData tree may not exist, making Get-Item throw.
-      # Pre-create the directory chain (hardcoded path) so the script can
-      # walk it. Diagnostics included so the workflow log shows what exists.
-      - name: Ensure AppData tree for cargokit
+      # cargokit's resolve_symlinks.ps1 (used by super_native_extensions)
+      # resolves .plugin_symlinks targets segment by segment with Get-Item.
+      # On GitHub Actions the default pub cache lives under
+      # C:\Users\runneradmin\AppData which is a broken path on the runner
+      # (Get-Item keeps failing even after the directory is created). Redirect
+      # PUB_CACHE to a plain directory on D: so symlink targets are always
+      # resolvable. Must run before `flutter pub get`.
+      - name: Redirect pub cache for cargokit
         shell: pwsh
         run: |
-          Write-Host "USERPROFILE=$env:USERPROFILE"
-          New-Item -ItemType Directory -Force -Path "C:\Users\runneradmin\AppData\Local\Pub\Cache" | Out-Null
-          Get-Item "C:\Users\runneradmin\AppData" | Select-Object FullName
-          Get-Item "C:\Users\runneradmin\AppData\Local\Pub\Cache" | Select-Object FullName
+          New-Item -ItemType Directory -Force -Path "D:\pub-cache" | Out-Null
+          "PUB_CACHE=D:\pub-cache" | Out-File -Append -FilePath $env:GITHUB_ENV
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
       - run: flutter build windows --release
