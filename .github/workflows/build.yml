@@ -66,7 +66,21 @@ jobs:
           "PUB_CACHE=D:\pub-cache" | Out-File -Append -FilePath $env:GITHUB_ENV
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
-      - run: flutter build windows --release
+      # Verbose build so native-assets hook errors are visible in the log,
+      # then upload the native assets log directory in case the step fails.
+      - name: Build Windows (verbose)
+        id: build_windows
+        run: flutter build windows --release -v
+      - name: Upload native assets logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-assets-logs
+          path: |
+            build/windows/x64/flutter/native_assets/
+            build/windows/x64/flutter/ephemeral/.plugin_symlinks/super_native_extensions/cargokit/build_tool/cargokit.log
+            .dart_tool/native_assets/
+          if-no-files-found: ignore
       - name: Extract Version
         id: extract_version
         run: |
