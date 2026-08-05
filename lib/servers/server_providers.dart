@@ -23,6 +23,7 @@ import 'package:maid_kit/agent/billing_service.dart';
 import 'package:maid_kit/agent/personality_service.dart';
 import 'package:maid_kit/shared/presentation/app_scaffold.dart';
 import 'app_theme_preferences.dart';
+import 'privacy_preferences.dart';
 import 'ghostty_terminal_session_adapter.dart';
 import 'cloud_sync_service.dart';
 import 'webdav_sync_service.dart';
@@ -524,6 +525,17 @@ class ThemeModeNotifier extends Notifier<ThemeMode> {
 
 final appThemeSettingsProvider = Provider<AppThemeSettings>(
   (ref) => InMemoryAppThemeSettings(),
+);
+
+/// Privacy preferences (e.g. hiding server addresses while streaming).
+/// main.dart overrides this with the loaded [PrivacyPreferences] instance.
+final privacySettingsProvider = Provider<PrivacySettings>(
+  (ref) => InMemoryPrivacySettings(),
+);
+
+/// Whether server IP addresses are hidden (screen recording / streaming).
+final hideServerAddressesProvider = Provider<bool>(
+  (ref) => ref.watch(privacySettingsProvider).hideServerAddresses,
 );
 
 final appSeedColorProvider = NotifierProvider<AppSeedColorNotifier, Color>(
