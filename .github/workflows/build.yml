@@ -59,6 +59,15 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.26.x'
+      # Go defaults its build cache to %LocalAppData%\go-build, but the
+      # runner's AppData tree is broken (LocalAppData is undefined), which
+      # makes `go build` fail with "GOCACHE is not defined". Point GOCACHE
+      # at a plain directory on D: instead.
+      - name: Configure Go cache
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "D:\go-cache" | Out-Null
+          "GOCACHE=D:\go-cache" | Out-File -Append -FilePath $env:GITHUB_ENV
       # cargokit's resolve_symlinks.ps1 (used by super_native_extensions)
       # resolves .plugin_symlinks targets segment by segment with Get-Item.
       # On GitHub Actions the default pub cache lives under
@@ -73,10 +82,8 @@ jobs:
           "PUB_CACHE=D:\pub-cache" | Out-File -Append -FilePath $env:GITHUB_ENV
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
-      # Verbose build so native-assets hook errors (hook stderr/output.json)
-      # are visible; upload hook runner logs on failure for offline analysis.
-      - name: Build Windows (verbose)
-        run: flutter build windows --release -v
+      - name: Build Windows
+        run: flutter build windows --release
       - name: Upload native assets logs
         if: failure()
         uses: actions/upload-artifact@v4
