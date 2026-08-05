@@ -35,6 +35,13 @@ jobs:
       # so install rustup explicitly before building.
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+      # libghostty (the vendored Ghostty terminal) compiles its native library
+      # from source with Zig via a native-assets hook. GitHub Actions runners
+      # do not ship Zig, so install it explicitly before building.
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: 0.15.2
       # cargokit's resolve_symlinks.ps1 (used by super_native_extensions)
       # resolves .plugin_symlinks targets segment by segment with Get-Item.
       # On GitHub Actions the default pub cache lives under
