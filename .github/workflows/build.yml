@@ -29,6 +29,12 @@ jobs:
         with:
           channel: stable
           cache: true
+      # super_native_extensions (via desktop_webview_window) builds Rust code
+      # through cargokit. GitHub Actions runners have no Rust preinstalled, and
+      # cargokit's auto-installer crashes on `C:\Users\runneradmin\AppData`,
+      # so install rustup explicitly before building.
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
       - run: flutter build windows --release
