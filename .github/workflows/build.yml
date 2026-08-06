@@ -162,6 +162,12 @@ jobs:
           $tcpContent = Get-Content $tcpFile -Raw
           $tcpContent = [regex]::Replace($tcpContent, '(RemotePort    int)', "`$1`n`tIdentity *nodeIdentity")
           Set-Content -Path $tcpFile -Value $tcpContent -Encoding utf8
+          # HttpIncomingRequest (http_fd_unsupported.go) likewise lacks the
+          # Identity field referenced by cmd/dylib/main.go.
+          $httpFile = Join-Path $goDir "http_fd_unsupported.go"
+          $httpContent = Get-Content $httpFile -Raw
+          $httpContent = [regex]::Replace($httpContent, '(RemotePort     int)', "`$1`n`tIdentity *nodeIdentity")
+          Set-Content -Path $httpFile -Value $httpContent -Encoding utf8
           # reactor.go is !windows; cmd/dylib/main.go still references the
           # Reactor* API, so provide Windows stubs in a fresh file.
           $reactorStub = @(
