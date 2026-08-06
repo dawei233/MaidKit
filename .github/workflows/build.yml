@@ -104,7 +104,7 @@ jobs:
           }
           $goDir = "D:\pub-cache\hosted\pub.dev\tailscale-0.8.0\go"
           Write-Host "hookDir=$($hookDir.FullName)"
-          go build -buildmode=c-shared -o (Join-Path $hookDir.FullName "tailscale.dll") (Join-Path $goDir "cmd\dylib\main.go")
+          go build -C $goDir -buildmode=c-shared -o (Join-Path $hookDir.FullName "tailscale.dll") ./cmd/dylib
           Get-Item (Join-Path $hookDir.FullName "tailscale.dll") | Select-Object FullName, Length
       - name: Build Windows
         run: flutter build windows --release
