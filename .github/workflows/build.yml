@@ -84,6 +84,13 @@ jobs:
       - run: dart run build_runner build --delete-conflicting-outputs
       - name: Build Windows
         run: flutter build windows --release
+        env:
+          # Native-assets hooks inherit this step's environment. GOCACHE must
+          # be present for the tailscale Go hook because the runner's default
+          # cache dir (%LocalAppData%\go-build) is broken; also set LocalAppData
+          # as a fallback since Go checks it before USERPROFILE.
+          GOCACHE: D:\go-cache
+          LocalAppData: D:\
       - name: Upload native assets logs
         if: failure()
         uses: actions/upload-artifact@v4
