@@ -93,16 +93,60 @@ jobs:
         id: build_first
         run: flutter build windows --release
         continue-on-error: true
+      # tailscale 0.8.0's Windows build is broken upstream: symbols like
+      # closeAllUdpBindings / httpBindingMu are only defined in *_posix.go
+      # (!windows) files, so `go build` fails on Windows. Patch the pub-cache
+      # copy with empty stubs (node_gate.go only uses Lock/Unlock/len), then
+      # pre-compile tailscale.dll into the hook output dir so the hook's
+      # idempotency check skips its own (broken) go build.
       - name: Pre-compile tailscale.dll into hook output dir
         shell: pwsh
         run: |
+          $goDir = "D:\pub-cache\hosted\pub.dev\tailscale-0.8.0\go"
+          Add-Content -Path (Join-Path $goDir "http_fd_unsupported.go") -Encoding utf8 -Value @"
+
+          // ---- Windows stubs (upstream 0.8.0 regression) ----
+          type httpBindingMuStub struct{}
+
+          func (httpBindingMuStub) Lock()   {}
+          func (httpBindingMuStub) Unlock() {}
+
+          var httpBindingMu httpBindingMuStub
+          var httpBindingRegistry = map[int64]struct{}{}
+
+          func resetTailnetHTTPTransport() {}
+"@
+          Add-Content -Path (Join-Path $goDir "tcp_fd_unsupported.go") -Encoding utf8 -Value @"
+
+          // ---- Windows stubs (upstream 0.8.0 regression) ----
+          type tcpFdListenerMuStub struct{}
+
+          func (tcpFdListenerMuStub) Lock()   {}
+          func (tcpFdListenerMuStub) Unlock() {}
+
+          var tcpFdListenerMu tcpFdListenerMuStub
+          var tcpFdListenerRegistry = map[int64]struct{}{}
+"@
+          Add-Content -Path (Join-Path $goDir "udp_fd_unsupported.go") -Encoding utf8 -Value @"
+
+          // ---- Windows stubs (upstream 0.8.0 regression) ----
+          type udpFdBindingMuStub struct{}
+
+          func (udpFdBindingMuStub) Lock()   {}
+          func (udpFdBindingMuStub) Unlock() {}
+
+          var udpFdBindingMu udpFdBindingMuStub
+          var udpFdBindingRegistry = map[int64]struct{}{}
+
+          func closeAllUdpBindings() {}
+"@
+          Write-Host "patched tailscale stubs"
           $env:GOCACHE = "D:\go-cache"
           $hookDir = Get-ChildItem ".dart_tool\hooks_runner\shared\tailscale\build" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $hookDir) {
             New-Item -ItemType Directory -Force -Path ".dart_tool\hooks_runner\shared\tailscale\build\tmp" | Out-Null
             $hookDir = Get-ChildItem ".dart_tool\hooks_runner\shared\tailscale\build" -Directory | Select-Object -First 1
           }
-          $goDir = "D:\pub-cache\hosted\pub.dev\tailscale-0.8.0\go"
           Write-Host "hookDir=$($hookDir.FullName)"
           go build -C $goDir -buildmode=c-shared -o (Join-Path $hookDir.FullName "tailscale.dll") ./cmd/dylib
           Get-Item (Join-Path $hookDir.FullName "tailscale.dll") | Select-Object FullName, Length
