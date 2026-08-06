@@ -114,7 +114,19 @@ jobs:
             "var httpBindingMu httpBindingMuStub",
             "var httpBindingRegistry = map[int64]struct{}{}",
             "",
-            "func resetTailnetHTTPTransport() {}"
+            "func resetTailnetHTTPTransport() {}",
+            "",
+            "type httpTransportCacheMu struct{}",
+            "",
+            "func (httpTransportCacheMu) Lock()   {}",
+            "func (httpTransportCacheMu) Unlock() {}",
+            "",
+            "type httpTransportCache struct {",
+            "  mu        httpTransportCacheMu",
+            "  transport interface{}",
+            "}",
+            "",
+            "var tailnetHTTPTransports httpTransportCache"
           )
           $tcpStub = @(
             "",
