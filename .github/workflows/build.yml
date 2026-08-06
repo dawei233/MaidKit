@@ -155,6 +155,34 @@ jobs:
           Add-Content -Path (Join-Path $goDir "http_fd_unsupported.go") -Encoding utf8 -Value $httpStub
           Add-Content -Path (Join-Path $goDir "tcp_fd_unsupported.go") -Encoding utf8 -Value $tcpStub
           Add-Content -Path (Join-Path $goDir "udp_fd_unsupported.go") -Encoding utf8 -Value $udpStub
+          # TcpFdConn is defined in tcp_fd_unsupported.go but lacks the
+          # Identity field that cmd/dylib/main.go expects (defined only in
+          # tcp_fd_posix.go). Add the field.
+          $tcpFile = Join-Path $goDir "tcp_fd_unsupported.go"
+          $tcpContent = Get-Content $tcpFile -Raw
+          $tcpContent = [regex]::Replace($tcpContent, '(RemotePort    int)', "`$1`n`tIdentity *nodeIdentity")
+          Set-Content -Path $tcpFile -Value $tcpContent -Encoding utf8
+          # reactor.go is !windows; cmd/dylib/main.go still references the
+          # Reactor* API, so provide Windows stubs in a fresh file.
+          $reactorStub = @(
+            "//go:build windows",
+            "",
+            "package tailscale",
+            "",
+            "import (",
+            "  `"errors`"",
+            "  `"unsafe`"",
+            ")",
+            "",
+            "func ReactorCreate() (int64, error) { return 0, errors.New(`"reactor not supported on Windows`") }",
+            "func ReactorClose(id int64) error { return nil }",
+            "func ReactorWake(id int64) error { return nil }",
+            "func ReactorRegister(id int64, fd int, transportID int64, events int) error { return nil }",
+            "func ReactorUpdate(id int64, fd int, transportID int64, events int) error { return nil }",
+            "func ReactorUnregister(id int64, fd int) error { return nil }",
+            "func ReactorWait(id int64, out unsafe.Pointer, maxEvents int, timeoutMillis int) (int, error) { return 0, nil }"
+          )
+          Set-Content -Path (Join-Path $goDir "windows_stubs.go") -Value $reactorStub -Encoding utf8
           Write-Host "patched tailscale stubs"
           $env:GOCACHE = "D:\go-cache"
           $hookDir = Get-ChildItem ".dart_tool\hooks_runner\shared\tailscale\build" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
