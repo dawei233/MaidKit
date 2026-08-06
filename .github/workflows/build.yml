@@ -82,15 +82,32 @@ jobs:
           "PUB_CACHE=D:\pub-cache" | Out-File -Append -FilePath $env:GITHUB_ENV
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
+      # The tailscale native-assets hook compiles Go code, but hooks run in a
+      # filtered environment (hooks_runner whitelist) that never includes
+      # GOCACHE/LocalAppData, and the runner's AppData tree is broken, so the
+      # Go build inside the hook always fails on Windows. Workaround: run the
+      # build once (fails, but creates the hook output dir), pre-compile the
+      # tailscale.dll manually with GOCACHE set, then rebuild - the hook's
+      # idempotency check (_outputIsUpToDate) then skips `go build`.
+      - name: First build (create hook dirs, expected to fail)
+        id: build_first
+        run: flutter build windows --release
+        continue-on-error: true
+      - name: Pre-compile tailscale.dll into hook output dir
+        shell: pwsh
+        run: |
+          $env:GOCACHE = "D:\go-cache"
+          $hookDir = Get-ChildItem ".dart_tool\hooks_runner\shared\tailscale\build" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $hookDir) {
+            New-Item -ItemType Directory -Force -Path ".dart_tool\hooks_runner\shared\tailscale\build\tmp" | Out-Null
+            $hookDir = Get-ChildItem ".dart_tool\hooks_runner\shared\tailscale\build" -Directory | Select-Object -First 1
+          }
+          $goDir = "D:\pub-cache\hosted\pub.dev\tailscale-0.8.0\go"
+          Write-Host "hookDir=$($hookDir.FullName)"
+          go build -buildmode=c-shared -o (Join-Path $hookDir.FullName "tailscale.dll") (Join-Path $goDir "cmd\dylib\main.go")
+          Get-Item (Join-Path $hookDir.FullName "tailscale.dll") | Select-Object FullName, Length
       - name: Build Windows
         run: flutter build windows --release
-        env:
-          # Native-assets hooks inherit this step's environment. GOCACHE must
-          # be present for the tailscale Go hook because the runner's default
-          # cache dir (%LocalAppData%\go-build) is broken; also set LocalAppData
-          # as a fallback since Go checks it before USERPROFILE.
-          GOCACHE: D:\go-cache
-          LocalAppData: D:\
       - name: Upload native assets logs
         if: failure()
         uses: actions/upload-artifact@v4
