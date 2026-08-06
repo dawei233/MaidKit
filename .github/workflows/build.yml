@@ -103,43 +103,46 @@ jobs:
         shell: pwsh
         run: |
           $goDir = "D:\pub-cache\hosted\pub.dev\tailscale-0.8.0\go"
-          Add-Content -Path (Join-Path $goDir "http_fd_unsupported.go") -Encoding utf8 -Value @"
-
-          // ---- Windows stubs (upstream 0.8.0 regression) ----
-          type httpBindingMuStub struct{}
-
-          func (httpBindingMuStub) Lock()   {}
-          func (httpBindingMuStub) Unlock() {}
-
-          var httpBindingMu httpBindingMuStub
-          var httpBindingRegistry = map[int64]struct{}{}
-
-          func resetTailnetHTTPTransport() {}
-"@
-          Add-Content -Path (Join-Path $goDir "tcp_fd_unsupported.go") -Encoding utf8 -Value @"
-
-          // ---- Windows stubs (upstream 0.8.0 regression) ----
-          type tcpFdListenerMuStub struct{}
-
-          func (tcpFdListenerMuStub) Lock()   {}
-          func (tcpFdListenerMuStub) Unlock() {}
-
-          var tcpFdListenerMu tcpFdListenerMuStub
-          var tcpFdListenerRegistry = map[int64]struct{}{}
-"@
-          Add-Content -Path (Join-Path $goDir "udp_fd_unsupported.go") -Encoding utf8 -Value @"
-
-          // ---- Windows stubs (upstream 0.8.0 regression) ----
-          type udpFdBindingMuStub struct{}
-
-          func (udpFdBindingMuStub) Lock()   {}
-          func (udpFdBindingMuStub) Unlock() {}
-
-          var udpFdBindingMu udpFdBindingMuStub
-          var udpFdBindingRegistry = map[int64]struct{}{}
-
-          func closeAllUdpBindings() {}
-"@
+          $httpStub = @(
+            "",
+            "// ---- Windows stubs (upstream 0.8.0 regression) ----",
+            "type httpBindingMuStub struct{}",
+            "",
+            "func (httpBindingMuStub) Lock()   {}",
+            "func (httpBindingMuStub) Unlock() {}",
+            "",
+            "var httpBindingMu httpBindingMuStub",
+            "var httpBindingRegistry = map[int64]struct{}{}",
+            "",
+            "func resetTailnetHTTPTransport() {}"
+          )
+          $tcpStub = @(
+            "",
+            "// ---- Windows stubs (upstream 0.8.0 regression) ----",
+            "type tcpFdListenerMuStub struct{}",
+            "",
+            "func (tcpFdListenerMuStub) Lock()   {}",
+            "func (tcpFdListenerMuStub) Unlock() {}",
+            "",
+            "var tcpFdListenerMu tcpFdListenerMuStub",
+            "var tcpFdListenerRegistry = map[int64]struct{}{}"
+          )
+          $udpStub = @(
+            "",
+            "// ---- Windows stubs (upstream 0.8.0 regression) ----",
+            "type udpFdBindingMuStub struct{}",
+            "",
+            "func (udpFdBindingMuStub) Lock()   {}",
+            "func (udpFdBindingMuStub) Unlock() {}",
+            "",
+            "var udpFdBindingMu udpFdBindingMuStub",
+            "var udpFdBindingRegistry = map[int64]struct{}{}",
+            "",
+            "func closeAllUdpBindings() {}"
+          )
+          Add-Content -Path (Join-Path $goDir "http_fd_unsupported.go") -Encoding utf8 -Value $httpStub
+          Add-Content -Path (Join-Path $goDir "tcp_fd_unsupported.go") -Encoding utf8 -Value $tcpStub
+          Add-Content -Path (Join-Path $goDir "udp_fd_unsupported.go") -Encoding utf8 -Value $udpStub
           Write-Host "patched tailscale stubs"
           $env:GOCACHE = "D:\go-cache"
           $hookDir = Get-ChildItem ".dart_tool\hooks_runner\shared\tailscale\build" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
